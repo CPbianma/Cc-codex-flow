@@ -1,0 +1,23 @@
+name = "dev"
+description = "Code development tasks: Claude decides + reviews, Codex implements."
+default_permission = "edit"
+
+[decider]
+agent = "claude"
+template_path = "templates/dev-decider.md"
+artifacts = ["decisions/{n}-plan.md"]
+
+[executor]
+agent = "codex"
+template_path = "templates/dev-executor.md"
+artifacts = ["execution/{n}-impl.md", "execution/{n}-diff.patch"]
+
+[reviewer]
+agent = "claude"
+template_path = "templates/dev-reviewer.md"
+artifacts = ["decisions/{n}-review.md"]
+
+[swap]
+decider = "codex"
+executor = "claude"
+reviewer = "codex"

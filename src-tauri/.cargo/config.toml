@@ -1,0 +1,7 @@
+[build]
+# Raise stack so rustc doesn't hit STATUS_STACK_BUFFER_OVERRUN
+# when compiling winsafe / tauri-build / tauri-utils on Windows.
+rustflags = ["-C", "link-arg=/STACK:16777216"]
+
+[env]
+RUST_MIN_STACK = "16777216"

@@ -1,0 +1,31 @@
+name = "visual"
+description = "Visual / aesthetic-sensitive tasks: Claude produces wireframe + visual spec first; Codex implements precisely without aesthetic improvisation."
+default_permission = "edit"
+
+[decider]
+agent = "claude"
+template_path = "templates/visual-decider.md"
+artifacts = [
+    "decisions/{n}-wireframe.md",
+    "decisions/{n}-visual-spec.md",
+    "decisions/{n}-plan.md",
+]
+
+[executor]
+agent = "codex"
+template_path = "templates/visual-executor.md"
+artifacts = [
+    "execution/{n}-impl.md",
+    "execution/{n}-diff.patch",
+    "execution/{n}-preview.png",
+]
+
+[reviewer]
+agent = "claude"
+template_path = "templates/visual-reviewer.md"
+artifacts = ["decisions/{n}-review.md"]
+
+[swap]
+decider = "codex"
+executor = "claude"
+reviewer = "codex"

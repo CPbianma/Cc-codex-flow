@@ -1,0 +1,272 @@
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
+use crate::adapter::{AgentAdapter, ProbeResult};
+use crate::adapter::claude::ClaudeAdapter;
+use crate::adapter::codex::CodexAdapter;
+use crate::error::{AppError, Result};
+use crate::orchestrator::Orchestrator;
+use crate::paths::paths;
+use crate::profile::Profile;
+use crate::settings::Settings;
+use crate::store::task::Task;
+use crate::workspace;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateTaskInput {
+    pub intent: String,
+    pub profile: Option<String>,
+    pub mode: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CreateTaskOutput {
+    pub task: Task,
+    pub workspace_path: String,
+}
+
+/// Settings view returned to the frontend. Exposes the *effective*
+/// `workspaces_root` (override if set, otherwise the default app-data root)
+/// as a plain string so the React layer can render it without juggling
+/// `PathBuf` ergonomics.
+#[derive(Clone, Debug, Serialize)]
+pub struct SettingsView {
+    pub default_profile: String,
+    pub default_mode: String,
+    pub workspaces_root: Option<String>,
+    pub claude_cli_path: Option<String>,
+    pub codex_cli_path: Option<String>,
+}
+
+fn settings_view(s: &Settings) -> SettingsView {
+    let effective_root = s
+        .workspaces_root_override
+        .clone()
+        .unwrap_or_else(|| paths().workspaces_root.clone());
+    SettingsView {
+        default_profile: s.default_profile.clone(),
+        default_mode: s.default_mode.clone(),
+        workspaces_root: Some(effective_root.to_string_lossy().into_owned()),
+        claude_cli_path: s
+            .claude_cli_path
+            .clone()
+            .map(|p| p.to_string_lossy().into_owned()),
+        codex_cli_path: s
+            .codex_cli_path
+            .clone()
+            .map(|p| p.to_string_lossy().into_owned()),
+    }
+}
+
+#[tauri::command]
+pub async fn create_task(input: CreateTaskInput) -> Result<CreateTaskOutput> {
+    let settings = Settings::load()?;
+    let profile = input.profile.unwrap_or(settings.default_profile);
+    let mode = input.mode.unwrap_or(settings.default_mode);
+
+    // We allocate the id + create db row first, then materialize the workspace
+    // so paths can reference the canonical id.
+    let mut task = Task::new(input.intent, profile, mode, String::new());
+    let ws = workspace::create_workspace(&task)?;
+    task.workspace_path = ws.to_string_lossy().into_owned();
+    task.insert()?;
+
+    Ok(CreateTaskOutput {
+        workspace_path: task.workspace_path.clone(),
+        task,
+    })
+}
+
+#[tauri::command]
+pub async fn list_tasks(limit: Option<i64>) -> Result<Vec<Task>> {
+    Task::list_recent(limit.unwrap_or(50))
+}
+
+#[tauri::command]
+pub async fn get_task(id: String) -> Result<Task> {
+    Task::get(&id)
+}
+
+#[tauri::command]
+pub async fn list_workspace_files(id: String) -> Result<Vec<String>> {
+    let task = Task::get(&id)?;
+    workspace::list_files(std::path::Path::new(&task.workspace_path))
+}
+
+#[tauri::command]
+pub async fn read_workspace_file(id: String, relative_path: String) -> Result<String> {
+    let task = Task::get(&id)?;
+    let path = std::path::Path::new(&task.workspace_path).join(&relative_path);
+    Ok(std::fs::read_to_string(&path)?)
+}
+
+#[tauri::command]
+pub async fn probe_agents() -> Result<Vec<ProbeResult>> {
+    let s = Settings::load()?;
+    let claude = ClaudeAdapter::new(s.claude_cli_path.map(|p| p.to_string_lossy().into_owned()));
+    let codex = CodexAdapter::new(s.codex_cli_path.map(|p| p.to_string_lossy().into_owned()));
+    Ok(vec![claude.probe().await, codex.probe().await])
+}
+
+#[tauri::command]
+pub async fn get_settings() -> Result<SettingsView> {
+    Ok(settings_view(&Settings::load()?))
+}
+
+/// Update the workspaces root override. The path is resolved (canonicalize
+/// optional — we accept the user's chosen path verbatim, only ensuring it
+/// exists and is a directory). Future tasks will be created underneath.
+#[tauri::command]
+pub async fn set_workspaces_root(path: String) -> Result<SettingsView> {
+    let pb = std::path::PathBuf::from(&path);
+    if !pb.exists() {
+        return Err(AppError::Other(format!("路径不存在: {path}")));
+    }
+    if !pb.is_dir() {
+        return Err(AppError::Other(format!("不是目录: {path}")));
+    }
+    let mut s = Settings::load()?;
+    s.workspaces_root_override = Some(pb);
+    s.save()?;
+    Ok(settings_view(&s))
+}
+
+/// Reset a task back to `Pending` so the user can start it over. We truncate
+/// `meta/state.json` and `meta/turns.jsonl` but deliberately keep
+/// `decisions/`, `execution/`, `discussion/`, `artifacts/` and `intent.md`
+/// — the user might still want them as reference.
+#[tauri::command]
+pub async fn reset_task(id: String) -> Result<()> {
+    let task = Task::get(&id)?;
+    let ws = std::path::Path::new(&task.workspace_path);
+    let meta = ws.join("meta");
+    if !meta.exists() {
+        std::fs::create_dir_all(&meta)?;
+    }
+    std::fs::write(
+        meta.join("state.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "state": "Pending",
+            "round": 0,
+            "history": [],
+        }))?,
+    )?;
+    // Truncate (don't delete) the turn log.
+    std::fs::write(meta.join("turns.jsonl"), "")?;
+    Ok(())
+}
+
+/// Spawn the FSM for an existing task on the tokio runtime and return
+/// immediately. Progress is reported via the `task.state_changed` event.
+#[tauri::command]
+pub async fn start_task(id: String, app: tauri::AppHandle) -> Result<()> {
+    let task = Task::get(&id)?;
+    let profile = Profile::load(&task.profile)?;
+    let settings = Settings::load()?;
+    let mode = task.mode.clone();
+
+    let claude: Arc<dyn AgentAdapter> = Arc::new(ClaudeAdapter::new(
+        settings.claude_cli_path.map(|p| p.to_string_lossy().into_owned()),
+    ));
+    let codex: Arc<dyn AgentAdapter> = Arc::new(CodexAdapter::new(
+        settings.codex_cli_path.map(|p| p.to_string_lossy().into_owned()),
+    ));
+
+    let mut orch = Orchestrator::new(task, profile, mode, claude, codex, Some(app));
+
+    // Detached background run — failures are logged but don't propagate to
+    // the IPC caller (they show up in state.json + the task.state_changed
+    // event stream instead).
+    tokio::spawn(async move {
+        if let Err(e) = orch.run().await {
+            tracing::error!(error = %e, "orchestrator run failed");
+        }
+    });
+    Ok(())
+}
+
+/// Read the FSM `state.json` for a task and return it verbatim.
+#[tauri::command]
+pub async fn get_task_state(id: String) -> Result<String> {
+    let task = Task::get(&id)?;
+    let path = std::path::Path::new(&task.workspace_path)
+        .join("meta")
+        .join("state.json");
+    if !path.exists() {
+        return Err(AppError::NotFound(format!("state.json for {id}")));
+    }
+    Ok(std::fs::read_to_string(&path)?)
+}
+
+/// Human-in-the-loop intervention. Records the action against the
+/// workspace; the FSM picks it up on its next iteration (Phase-3 wiring).
+///
+/// Recognised action tags:
+///   * `pause`  / `resume` — toggles `meta/control.json { paused: bool }`
+///   * `abort`              — writes `meta/abort.flag`
+///   * `retry`              — writes `meta/retry.flag`
+///   * `feedback:<text>`    — appended to `meta/feedback.jsonl`
+/// Every action is also appended verbatim to `meta/interventions.jsonl`.
+#[tauri::command]
+pub async fn intervene(id: String, action: String) -> Result<()> {
+    let task = Task::get(&id)?;
+    let meta = std::path::Path::new(&task.workspace_path).join("meta");
+    std::fs::create_dir_all(&meta)?;
+
+    // Always append to the canonical log.
+    {
+        let path = meta.join("interventions.jsonl");
+        let line = serde_json::json!({
+            "ts": chrono::Utc::now().to_rfc3339(),
+            "action": action,
+        });
+        let mut content = serde_json::to_string(&line)?;
+        content.push('\n');
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        f.write_all(content.as_bytes())?;
+    }
+
+    // Per-action side-effects.
+    match action.as_str() {
+        "pause" => {
+            std::fs::write(
+                meta.join("control.json"),
+                serde_json::to_string_pretty(&serde_json::json!({ "paused": true }))?,
+            )?;
+        }
+        "resume" => {
+            std::fs::write(
+                meta.join("control.json"),
+                serde_json::to_string_pretty(&serde_json::json!({ "paused": false }))?,
+            )?;
+        }
+        "abort" => {
+            std::fs::write(meta.join("abort.flag"), chrono::Utc::now().to_rfc3339())?;
+        }
+        "retry" => {
+            std::fs::write(meta.join("retry.flag"), chrono::Utc::now().to_rfc3339())?;
+        }
+        s if s.starts_with("feedback:") => {
+            let body = &s["feedback:".len()..];
+            let line = serde_json::json!({
+                "ts": chrono::Utc::now().to_rfc3339(),
+                "text": body,
+            });
+            let mut content = serde_json::to_string(&line)?;
+            content.push('\n');
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(meta.join("feedback.jsonl"))?;
+            f.write_all(content.as_bytes())?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
