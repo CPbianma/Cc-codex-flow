@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Flow — Failed state evidence</title>
+<style>
+:root {
+  --bg:           #FAF9F5;
+  --bg-2:         #F5F4ED;
+  --bg-3:         #EFEDE3;
+  --surface:      #FFFFFF;
+  --surface-soft: #FBFAF6;
+  --ink:          #1A1915;
+  --ink-2:        #2C2A24;
+  --ink-dim:      #6B6862;
+  --ink-faint:    #9A958C;
+  --border:        #E5E2D9;
+  --border-strong: #D9D5C9;
+  --border-soft:   #EEEBE0;
+  --accent:        #CC785C;
+  --accent-soft:   #F4E3DA;
+  --ok:            #4B7F52;
+  --ok-soft:       #E7EFE3;
+  --fail:          #B0463A;
+  --fail-soft:     #F1DEDA;
+  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI",
+               "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-serif: "Source Serif 4", "Tiempos Text", Georgia, "Songti SC", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --r-xs: 3px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--bg);
+}
+* { box-sizing: border-box; }
+body, html { margin: 0; padding: 0; background: var(--bg); }
+
+.app { display: flex; flex-direction: column; height: 900px; background: var(--bg); }
+
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 22px; height: 52px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-serif); font-weight: 600; font-size: 17px;
+}
+.brand .dot {
+  width: 11px; height: 11px; background: var(--accent); border-radius: 2px;
+}
+.brand-sub {
+  color: var(--ink-dim); font-size: 12px; font-weight: 400; margin-left: 6px;
+}
+.topbar-spacer { flex: 1; }
+.btn-mini {
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm); padding: 5px 11px;
+  font-size: 12px; cursor: pointer; color: var(--ink);
+}
+
+.body { display: flex; flex: 1; min-height: 0; }
+
+.pane {
+  display: flex; flex-direction: column; min-height: 0;
+  border-right: 1px solid var(--border);
+}
+.pane-left   { width: 280px; background: var(--bg-2); }
+.pane-center { flex: 1; background: var(--bg); }
+.pane-right  { width: 240px; border-right: none; background: var(--bg-2); }
+
+.pane-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 500; font-size: 11px; letter-spacing: 0.8px;
+  color: var(--ink-dim); text-transform: uppercase;
+  min-height: 48px;
+}
+.pane-body { flex: 1; overflow-y: auto; min-height: 0; padding: 6px 8px; }
+
+.task-row {
+  padding: 11px 12px; border-radius: var(--r-md);
+  border: 1px solid transparent; margin-bottom: 2px;
+  position: relative;
+}
+.task-row.selected {
+  background: var(--surface); border-color: var(--border-strong);
+}
+.task-row.selected::before {
+  content: ""; position: absolute; left: 0; top: 12px; bottom: 12px;
+  width: 2px; border-radius: 2px; background: var(--accent);
+}
+.task-intent { font-size: 13px; margin-bottom: 8px; line-height: 1.45; }
+.task-meta { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.task-sub { font-size: 11px; color: var(--ink-dim); margin-top: 6px; }
+
+.badge {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  padding: 2px 7px;
+  font-size: 10.5px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  text-transform: lowercase;
+  color: var(--ink-2);
+  display: inline-flex; align-items: center;
+}
+.badge-dev    { color: #3F6B8A; background: #E6EEF4; border-color: #D2DEE8; }
+.badge-visual { color: #8A6228; background: #F3EAD9; border-color: #E5D6BD; }
+.badge.state {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: #ECD2C5;
+}
+.badge.state.fail {
+  color: var(--fail);
+  background: var(--fail-soft);
+  border-color: #E5C4BD;
+}
+.badge.err-badge {
+  background: var(--fail-soft);
+  color: var(--fail);
+  border-color: #E5C4BD;
+  text-transform: none;
+  letter-spacing: 0.2px;
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-title {
+  display: flex; align-items: center; gap: 10px;
+  min-width: 0; width: 100%;
+}
+.thread-title-text {
+  font-family: var(--font-serif);
+  font-weight: 500; font-size: 15px;
+  color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-transform: none; letter-spacing: 0;
+}
+.thread-actions {
+  margin-left: auto; display: flex; gap: 6px;
+}
+.thread-actions .btn-mini { white-space: nowrap; }
+.btn-mini.primary {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+
+.turn-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  margin: 12px 16px;
+  overflow: hidden;
+}
+.turn-head {
+  display: flex; gap: 10px; align-items: center;
+  padding: 10px 14px;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+.turn-avatar {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--ink-dim); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.turn-avatar.c { background: #6B7280; }
+.turn-avatar.x { background: #4B5563; }
+.turn-meta { color: var(--ink-dim); font-size: 11.5px; }
+.turn-meta-right { margin-left: auto; }
+.turn-body {
+  padding: 14px 16px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+.turn-body.fail-body {
+  background: #FDF6F4;
+  color: var(--fail);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.pane-section-title {
+  font-size: 11px; letter-spacing: 0.8px; color: var(--ink-dim);
+  text-transform: uppercase; padding: 14px 18px 8px;
+}
+.right-empty { padding: 14px 18px; color: var(--ink-faint); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span>Flow</span>
+      <span class="brand-sub">Claude × Codex orchestrator</span>
+    </div>
+    <div class="topbar-spacer"></div>
+    <button class="btn-mini">设置</button>
+  </div>
+  <div class="body">
+    <div class="pane pane-left">
+      <div class="pane-header">
+        <span>任务</span>
+        <button class="btn-mini primary">新建任务</button>
+      </div>
+      <div class="pane-body">
+        <div class="task-row selected">
+          <div class="task-meta" style="margin-bottom:8px">
+            <span class="badge state fail">failed</span>
+            <span class="badge">r2</span>
+            <span class="badge badge-dev">dev</span>
+          </div>
+          <div class="task-intent">写一个把 markdown 转 docx 的 Python 脚本</div>
+          <div class="task-sub">eede5090 · 2026/05/23 21:46</div>
+        </div>
+        <div class="task-row">
+          <div class="task-meta" style="margin-bottom:8px">
+            <span class="badge state" style="color: var(--ok); background: var(--ok-soft); border-color: #CEDFC6">done</span>
+            <span class="badge badge-visual">visual</span>
+          </div>
+          <div class="task-intent">为登陆页面生成一张 hero 插图</div>
+          <div class="task-sub">a3bbf412 · 2026/05/23 18:20</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane pane-center">
+      <div class="pane-header" style="text-transform:none; letter-spacing:0; font-size:13px;">
+        <div class="thread-title">
+          <span class="badge state fail">Failed</span>
+          <span class="badge">R2</span>
+          <span class="badge err-badge" title="deliberate trigger for screenshot 5">错误: deliberate trigger for screenshot 5</span>
+          <span class="thread-title-text">写一个把 markdown 转 docx 的 Python 脚本</span>
+          <div class="thread-actions">
+            <button class="btn-mini">重试当前轮</button>
+            <button class="btn-mini">给下一轮反馈…</button>
+            <button class="btn-mini">重置为 Pending</button>
+          </div>
+        </div>
+      </div>
+      <div class="pane-body">
+        <div class="turn-card">
+          <div class="turn-head">
+            <span class="turn-avatar c">C</span>
+            <span style="font-weight:500">决策 · Claude</span>
+            <span class="badge">r1</span>
+            <span class="badge">decide</span>
+            <span class="turn-meta turn-meta-right">耗时 8.2s · exit 0</span>
+          </div>
+          <div class="turn-body">将任务拆为三步：（1）选择 markdown 解析库 markdown-it-py；（2）用 python-docx 写出 .docx；（3）处理标题/列表/代码块映射。</div>
+        </div>
+
+        <div class="turn-card">
+          <div class="turn-head">
+            <span class="turn-avatar x">X</span>
+            <span style="font-weight:500">执行 · Codex</span>
+            <span class="badge">r1</span>
+            <span class="badge">execute</span>
+            <span class="turn-meta turn-meta-right">耗时 47.8s · exit 0</span>
+          </div>
+          <div class="turn-body">已写入 artifacts/md2docx.py (11463 字节)
+- 支持标题 H1–H6
+- 支持有序/无序列表
+- 支持 fenced code block</div>
+        </div>
+
+        <div class="turn-card">
+          <div class="turn-head">
+            <span class="turn-avatar c">C</span>
+            <span style="font-weight:500">审查 · Claude</span>
+            <span class="badge">r2</span>
+            <span class="badge">review</span>
+            <span class="turn-meta turn-meta-right">耗时 6.4s · exit 1</span>
+          </div>
+          <div class="turn-body fail-body">FSM 终止于 R2_Reviewing。
+原因：deliberate trigger for screenshot 5
+
+最近一条 reviewer 输出（decisions/002-review.md）首行非 PASS / FAIL:&lt;reason&gt;，
+也未在 30s 内产生新内容，FSM 自动进入 Failed 态。
+可使用「重试当前轮」或写入 meta/feedback.jsonl 后再「重置为 Pending」继续。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane pane-right">
+      <div class="pane-section-title">AGENTS</div>
+      <div class="right-empty">claude · codex 均已探活</div>
+      <div class="pane-section-title">WORKSPACE</div>
+      <div class="right-empty">eede5090-…/meta/state.json<br />state = Failed</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
