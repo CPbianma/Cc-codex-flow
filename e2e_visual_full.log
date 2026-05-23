@@ -1,0 +1,25 @@
+[e2e_visual] claude = Some("C:/Users/<user>/.local/bin/claude.cmd")
+[e2e_visual] codex  = Some("E:/develop/nodejs/codex.cmd")
+[e2e_visual] workspace = C:\Users\<user>\AppData\Local\flow\workspaces\a3bbf412-75e0-484a-b6a1-8876223920bb
+[2m2026-05-23T13:05:23.411607Z[0m [32m INFO[0m [2mflow_lib::adapter::claude[0m[2m:[0m spawning claude [3mturn[0m[2m=[0mr1-decide [3mbinary[0m[2m=[0mC:/Users/<user>/.local/bin/claude.cmd
+[2m2026-05-23T13:08:20.007222Z[0m [32m INFO[0m [2mflow_lib::adapter::codex[0m[2m:[0m spawning codex [3mturn[0m[2m=[0mr1-execute [3mbinary[0m[2m=[0mE:/develop/nodejs/codex.cmd
+[2m2026-05-23T13:14:53.945768Z[0m [32m INFO[0m [2mflow_lib::adapter::claude[0m[2m:[0m spawning claude [3mturn[0m[2m=[0mr1-review [3mbinary[0m[2m=[0mC:/Users/<user>/.local/bin/claude.cmd
+[2m2026-05-23T13:17:10.165307Z[0m [32m INFO[0m [2mflow_lib::adapter::claude[0m[2m:[0m spawning claude [3mturn[0m[2m=[0mr2-decide [3mbinary[0m[2m=[0mC:/Users/<user>/.local/bin/claude.cmd
+[2m2026-05-23T13:20:54.421132Z[0m [32m INFO[0m [2mflow_lib::adapter::codex[0m[2m:[0m spawning codex [3mturn[0m[2m=[0mr2-execute [3mbinary[0m[2m=[0mE:/develop/nodejs/codex.cmd
+[2m2026-05-23T13:28:33.312129Z[0m [32m INFO[0m [2mflow_lib::adapter::claude[0m[2m:[0m spawning claude [3mturn[0m[2m=[0mr2-review [3mbinary[0m[2m=[0mC:/Users/<user>/.local/bin/claude.cmd
+[e2e_visual] WALL-CLOCK CAP HIT (>25 min) — printing best-effort state below
+[e2e_visual] terminal state: R2Reviewing
+[e2e_visual] history       : ["R1_Deciding", "R1_Executing", "R1_Reviewing", "R2_Deciding", "R2_Executing", "R2_Reviewing"]
+[e2e_visual] last_error    : None
+[e2e_visual] decisions/    :
+  001-plan.md (7541 bytes)
+  001-review.md (3968 bytes)
+  001-visual-spec.md (8479 bytes)
+  001-wireframe.md (6988 bytes)
+  002-plan.md (5051 bytes)
+  002-visual-spec.md (11609 bytes)
+  002-wireframe.md (10251 bytes)
+[e2e_visual] OK  001-plan.md (7541 bytes)
+[e2e_visual] OK  001-wireframe.md (6988 bytes)
+[e2e_visual] OK  001-visual-spec.md (8479 bytes)
+[e2e_visual] reached >= R1_Reviewing? true  (state = R2Reviewing)
