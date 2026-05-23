@@ -1,6 +1,10 @@
 # Logs
 logs
 *.log
+!docs/evidence/*.log
+
+# Playwright MCP scratch dir
+.playwright-mcp/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
