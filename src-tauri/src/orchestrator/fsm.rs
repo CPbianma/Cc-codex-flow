@@ -535,3 +535,223 @@ fn parse_review_verdict(path: &std::path::Path) -> (bool, String) {
     }
     (false, "first line is not PASS / FAIL:<reason>".into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapter::{ProbeResult, Permission as Perm};
+    use async_trait::async_trait;
+    use chrono::Utc;
+    use std::path::PathBuf;
+
+    /// A canned adapter used by the orchestrator-level tests. Never spawns
+    /// anything; `invoke` is a no-op returning a successful empty response.
+    struct DummyAdapter {
+        id: AgentId,
+    }
+
+    #[async_trait]
+    impl AgentAdapter for DummyAdapter {
+        fn id(&self) -> AgentId {
+            self.id
+        }
+        async fn probe(&self) -> ProbeResult {
+            ProbeResult {
+                agent: self.id,
+                binary_path: None,
+                version: Some("dummy".into()),
+                ok: true,
+                error: None,
+            }
+        }
+        async fn invoke(&self, _req: InvokeRequest) -> Result<InvokeResponse> {
+            Ok(InvokeResponse {
+                stdout: String::new(),
+                stderr: String::new(),
+                artifacts_written: Vec::new(),
+                raw_log_path: None,
+                exit_code: 0,
+                duration_ms: 0,
+            })
+        }
+    }
+
+    fn fresh_workspace(tag: &str) -> PathBuf {
+        let id = uuid::Uuid::new_v4().to_string();
+        let ws = std::env::temp_dir().join(format!("flow-fsm-{tag}-{id}"));
+        std::fs::create_dir_all(ws.join("meta")).expect("mkdir meta");
+        std::fs::create_dir_all(ws.join("decisions")).expect("mkdir decisions");
+        ws
+    }
+
+    fn write_review(ws: &std::path::Path, round: u32, body: &str) -> PathBuf {
+        let p = ws.join("decisions").join(format!("{round:03}-review.md"));
+        std::fs::write(&p, body).expect("write review");
+        p
+    }
+
+    fn dummy_profile() -> Profile {
+        // Use a hand-built minimal profile so we don't read disk.
+        use crate::profile::{RoleSpec, SwapSpec};
+        let spec = RoleSpec {
+            agent: AgentId::Claude,
+            template_path: "templates/dev-decider.md".into(),
+            artifacts: vec![],
+        };
+        Profile {
+            name: "dev".into(),
+            description: String::new(),
+            default_permission: Perm::ReadOnly,
+            decider: spec.clone(),
+            executor: RoleSpec {
+                agent: AgentId::Codex,
+                template_path: "templates/dev-executor.md".into(),
+                artifacts: vec![],
+            },
+            reviewer: spec,
+            swap: SwapSpec::default(),
+        }
+    }
+
+    fn make_orch(ws: &std::path::Path) -> Orchestrator {
+        let task = Task {
+            id: uuid::Uuid::new_v4().to_string(),
+            intent: "test".into(),
+            profile: "dev".into(),
+            mode: "auto".into(),
+            state: "Pending".into(),
+            workspace_path: ws.to_string_lossy().into_owned(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        Orchestrator::new(
+            task,
+            dummy_profile(),
+            "auto".into(),
+            Arc::new(DummyAdapter { id: AgentId::Claude }),
+            Arc::new(DummyAdapter { id: AgentId::Codex }),
+            None,
+        )
+    }
+
+    // ─── parse_review_verdict ────────────────────────────────────────────────
+
+    #[test]
+    fn verdict_missing_file_returns_not_found() {
+        let ws = fresh_workspace("verdict-missing");
+        let p = ws.join("decisions").join("001-review.md");
+        let (pass, reason) = parse_review_verdict(&p);
+        assert!(!pass);
+        assert!(reason.contains("not found"), "got: {reason}");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn verdict_pass_first_line() {
+        let ws = fresh_workspace("verdict-pass");
+        let p = write_review(&ws, 1, "PASS\n\nlooks good\n");
+        let (pass, reason) = parse_review_verdict(&p);
+        assert!(pass);
+        assert!(reason.is_empty());
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn verdict_pass_with_trailing_notes() {
+        let ws = fresh_workspace("verdict-pass-trail");
+        let p = write_review(&ws, 1, "pass with optional trailing notes\n");
+        let (pass, reason) = parse_review_verdict(&p);
+        assert!(pass);
+        assert!(reason.is_empty());
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn verdict_fail_with_reason() {
+        let ws = fresh_workspace("verdict-fail");
+        let p = write_review(&ws, 1, "FAIL: needs error handling\nadditional notes\n");
+        let (pass, reason) = parse_review_verdict(&p);
+        assert!(!pass);
+        assert!(reason.contains("needs error handling"), "got: {reason}");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn verdict_junk_first_line() {
+        let ws = fresh_workspace("verdict-junk");
+        let p = write_review(&ws, 1, "hello world\n");
+        let (pass, reason) = parse_review_verdict(&p);
+        assert!(!pass);
+        assert!(reason.contains("PASS") || reason.contains("FAIL"), "got: {reason}");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    // ─── check_interventions ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn intervention_pause_returns_ok_false_when_unpaused_quickly() {
+        let ws = fresh_workspace("interv-pause");
+        let mut orch = make_orch(&ws);
+        orch.state = FsmState::R1Deciding;
+        // Drop a paused-true control.json, then immediately flip to paused=false
+        // from a background task so the spin-loop exits in tests.
+        std::fs::write(
+            ws.join("meta").join("control.json"),
+            serde_json::json!({"paused": true}).to_string(),
+        )
+        .unwrap();
+        let ctrl = ws.join("meta").join("control.json");
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let _ = std::fs::write(
+                &ctrl,
+                serde_json::json!({"paused": false}).to_string(),
+            );
+        });
+        let aborted = orch.check_interventions().await.unwrap();
+        assert!(!aborted, "pause must not return aborted=true");
+        // State unchanged.
+        assert_eq!(orch.state, FsmState::R1Deciding);
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[tokio::test]
+    async fn intervention_abort_transitions_to_failed() {
+        let ws = fresh_workspace("interv-abort");
+        // Write a fresh state.json so persist_state's first write works.
+        std::fs::write(
+            ws.join("meta").join("state.json"),
+            r#"{"state":"R1_Executing","round":1,"history":[]}"#,
+        )
+        .unwrap();
+        let mut orch = make_orch(&ws);
+        orch.state = FsmState::R1Executing;
+        std::fs::write(ws.join("meta").join("abort.flag"), "x").unwrap();
+
+        let aborted = orch.check_interventions().await.unwrap();
+        assert!(aborted, "abort must return aborted=true");
+        assert_eq!(orch.state, FsmState::Failed);
+        assert_eq!(orch.last_error.as_deref(), Some("用户中止"));
+        assert!(!ws.join("meta").join("abort.flag").exists(), "flag should be removed");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[tokio::test]
+    async fn intervention_retry_rewinds_reviewing_to_deciding() {
+        let ws = fresh_workspace("interv-retry");
+        std::fs::write(
+            ws.join("meta").join("state.json"),
+            r#"{"state":"R2_Reviewing","round":2,"history":[]}"#,
+        )
+        .unwrap();
+        let mut orch = make_orch(&ws);
+        orch.state = FsmState::R2Reviewing;
+        std::fs::write(ws.join("meta").join("retry.flag"), "x").unwrap();
+
+        let aborted = orch.check_interventions().await.unwrap();
+        assert!(!aborted);
+        assert_eq!(orch.state, FsmState::R2Deciding);
+        assert!(!ws.join("meta").join("retry.flag").exists());
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+}

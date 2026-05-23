@@ -32,7 +32,27 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     async fn probe(&self) -> ProbeResult {
-        let out = Command::new(&self.binary).arg("--version").output().await;
+        let lower = self.binary.to_ascii_lowercase();
+        let out = if lower.ends_with(".cmd") || lower.ends_with(".bat") {
+            Command::new("cmd.exe")
+                .arg("/C")
+                .arg(&self.binary)
+                .arg("--version")
+                .output()
+                .await
+        } else if lower.ends_with(".ps1") {
+            Command::new("powershell.exe")
+                .arg("-NoProfile")
+                .arg("-ExecutionPolicy")
+                .arg("Bypass")
+                .arg("-File")
+                .arg(&self.binary)
+                .arg("--version")
+                .output()
+                .await
+        } else {
+            Command::new(&self.binary).arg("--version").output().await
+        };
 
         match out {
             Ok(o) if o.status.success() => ProbeResult {
@@ -100,8 +120,38 @@ impl AgentAdapter for ClaudeAdapter {
 
         tracing::info!(turn = %req.turn_id, binary = %self.binary, "spawning claude");
 
-        let mut child = Command::new(&self.binary)
-            .args(&args)
+        // Windows refuses to spawn .cmd/.bat directly with arbitrary args
+        // via CreateProcess. Detect and wrap through cmd.exe /C (same as
+        // the Codex adapter does for parity).
+        let lower = self.binary.to_ascii_lowercase();
+        let is_cmd = lower.ends_with(".cmd") || lower.ends_with(".bat");
+        let is_ps1 = lower.ends_with(".ps1");
+
+        let mut cmd = if is_cmd {
+            let mut c = Command::new("cmd.exe");
+            c.arg("/C").arg(&self.binary);
+            for a in &args {
+                c.arg(a);
+            }
+            c
+        } else if is_ps1 {
+            let mut c = Command::new("powershell.exe");
+            c.arg("-NoProfile")
+                .arg("-ExecutionPolicy")
+                .arg("Bypass")
+                .arg("-File")
+                .arg(&self.binary);
+            for a in &args {
+                c.arg(a);
+            }
+            c
+        } else {
+            let mut c = Command::new(&self.binary);
+            c.args(&args);
+            c
+        };
+
+        let mut child = cmd
             .current_dir(&req.workspace)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

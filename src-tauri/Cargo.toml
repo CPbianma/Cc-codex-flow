@@ -46,3 +46,20 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 once_cell = "1"
 dirs = "5"
 which = "6"
+
+# Integration tests live in tests/. Declared explicitly so build.rs can
+# emit `cargo:rustc-link-arg-tests=` directives (which are only accepted
+# when at least one [[test]] target exists), letting us embed a
+# common-controls v6 manifest into unit-test binaries on Windows.
+[[test]]
+name = "manifest_anchor"
+path = "tests/manifest_anchor.rs"
+harness = false
+
+[[example]]
+name = "e2e_dev"
+path = "examples/e2e_dev.rs"
+
+[[example]]
+name = "e2e_visual"
+path = "examples/e2e_visual.rs"

@@ -234,7 +234,7 @@ fn collect_artifacts(workspace: &Path, since: SystemTime) -> Result<Vec<PathBuf>
 /// Read `<workspace>/mcp.shared.json` and translate its `mcpServers` map into
 /// Codex `-c mcp_servers.<name>.<key>=<toml-value>` overrides appended to
 /// `args`. Silently no-ops if the file is missing or invalid.
-fn inject_mcp_servers(workspace: &Path, args: &mut Vec<String>) {
+pub(crate) fn inject_mcp_servers(workspace: &Path, args: &mut Vec<String>) {
     let path = workspace.join("mcp.shared.json");
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
@@ -345,4 +345,64 @@ fn walk_for_artifacts(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn fresh_workspace(tag: &str) -> PathBuf {
+        let id = uuid::Uuid::new_v4().to_string();
+        let ws = std::env::temp_dir().join(format!("flow-mcp-{tag}-{id}"));
+        std::fs::create_dir_all(&ws).expect("mkdir ws");
+        ws
+    }
+
+    #[test]
+    fn inject_no_file_leaves_args_unchanged() {
+        let ws = fresh_workspace("no-file");
+        let mut args: Vec<String> = vec!["exec".into(), "--".into()];
+        let before = args.clone();
+        inject_mcp_servers(&ws, &mut args);
+        assert_eq!(args, before);
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn inject_translates_full_server_spec() {
+        let ws = fresh_workspace("full");
+        let cfg = serde_json::json!({
+            "mcpServers": {
+                "foo": {
+                    "command": "node",
+                    "args": ["s.js"],
+                    "env": {"K": "V"}
+                }
+            }
+        });
+        std::fs::write(ws.join("mcp.shared.json"), cfg.to_string()).unwrap();
+
+        let mut args: Vec<String> = Vec::new();
+        inject_mcp_servers(&ws, &mut args);
+
+        // Build a joined string for substring checks.
+        let joined = args.join(" ");
+        assert!(
+            joined.contains("mcp_servers.foo.command=\"node\""),
+            "command override missing in: {joined}"
+        );
+        assert!(
+            joined.contains("mcp_servers.foo.args=[\"s.js\"]"),
+            "args override missing in: {joined}"
+        );
+        assert!(
+            joined.contains("mcp_servers.foo.env.K=\"V\""),
+            "env override missing in: {joined}"
+        );
+        // Each override is preceded by a \"-c\".
+        let dash_c_count = args.iter().filter(|a| a.as_str() == "-c").count();
+        assert_eq!(dash_c_count, 3, "expected 3 -c flags, got {dash_c_count} (args={args:?})");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
 }
