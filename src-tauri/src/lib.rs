@@ -108,7 +108,7 @@ fn recover_orphan_tasks() -> error::Result<usize> {
             tracing::warn!(task_id = %task.id, error = %e, "failed to write state.json");
             continue;
         }
-        let _ = val; // keep `val` from being dead in non-trace builds
+        let _ = val; // silence dead-store on non-trace builds
         count += 1;
     }
     Ok(count)
