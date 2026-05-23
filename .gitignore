@@ -21,6 +21,22 @@ dist-ssr
 .claude-prompt.txt
 prompt-*.txt
 
+# Secrets / credentials — never commit. Defensive even if no such file
+# currently exists; future muscle-memory mistakes get caught here.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+.netrc
+credentials.json
+secret.json
+secrets.json
+secrets/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
