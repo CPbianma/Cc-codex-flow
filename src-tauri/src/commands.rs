@@ -189,11 +189,17 @@ pub async fn reset_task(id: String) -> Result<()> {
     // Truncate (don't delete) the turn log.
     std::fs::write(meta.join("turns.jsonl"), "")?;
     // Clear stale control / feedback cursors so the next run starts clean.
+    // We also truncate feedback.jsonl itself so an aborted run's guidance
+    // doesn't leak into the next R1 Decider's user_message.
     for stale in ["abort.flag", "retry.flag", "feedback.cursor", "control.json"] {
         let p = meta.join(stale);
         if p.exists() {
             let _ = std::fs::remove_file(&p);
         }
+    }
+    let fb = meta.join("feedback.jsonl");
+    if fb.exists() {
+        std::fs::write(&fb, "")?;
     }
     Ok(())
 }

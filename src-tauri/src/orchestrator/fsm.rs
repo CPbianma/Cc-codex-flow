@@ -204,8 +204,18 @@ impl Orchestrator {
             let total_len = full.len() as u64;
             if total_len > cursor {
                 let tail = &full[cursor as usize..];
+                // Only consume up to the last complete line; any partial trailing
+                // line (writer mid-flush) stays for the next poll. This avoids the
+                // data-loss bug where a partial line that fails parse silently
+                // bumps the cursor past those bytes.
+                let last_newline = tail.iter().rposition(|&b| b == b'\n');
+                let consumable = match last_newline {
+                    Some(i) => &tail[..=i],
+                    None => &[][..],
+                };
+                let consumed_len = consumable.len() as u64;
                 let mut parts: Vec<String> = Vec::new();
-                for line in tail.split(|b| *b == b'\n') {
+                for line in consumable.split(|b| *b == b'\n') {
                     if line.is_empty() {
                         continue;
                     }
@@ -227,7 +237,9 @@ impl Orchestrator {
                         None => combined,
                     });
                 }
-                std::fs::write(&cursor_path, total_len.to_string())?;
+                if consumed_len > 0 {
+                    std::fs::write(&cursor_path, (cursor + consumed_len).to_string())?;
+                }
             }
         }
 

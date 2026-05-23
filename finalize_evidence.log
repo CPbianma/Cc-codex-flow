@@ -1,0 +1,56 @@
+
+==== [M] Trigger Failed on dev E2E workspace ====
+[M] workspace: C:\Users\<user>\AppData\Local\flow\workspaces\9bf8b2e4-7cd0-4383-b27d-4f6fd4472243
+[M] BEFORE:
+---8<--- C:\Users\<user>\AppData\Local\flow\workspaces\9bf8b2e4-7cd0-4383-b27d-4f6fd4472243\meta\state.json
+{
+  "state": "R2_Executing",
+  "round": 2,
+  "history": [
+    "R1_Deciding",
+    "R1_Executing",
+    "R1_Reviewing",
+    "R2_Deciding",
+    "R2_Executing"
+  ]
+}
+--->8---
+[M] after abort: state=Failed last_error=Some("用户中止")
+[M] AFTER:
+---8<--- C:\Users\<user>\AppData\Local\flow\workspaces\9bf8b2e4-7cd0-4383-b27d-4f6fd4472243\meta\state.json
+{
+  "state": "Failed",
+  "round": 0,
+  "history": [
+    "R1_Deciding",
+    "R1_Executing",
+    "R1_Reviewing",
+    "R2_Deciding",
+    "R2_Executing",
+    "Failed"
+  ],
+  "error": "用户中止"
+}
+--->8---
+[M] artifacts/ contents:
+  md2docx.py (17130 bytes)
+  README.md (1143 bytes)
+  requirements.txt (35 bytes)
+  sample.md (848 bytes)
+  __pycache__ (0 bytes)
+[M] PASS — terminal Failed with clear error 用户中止; artifacts/md2docx.py preserved
+
+==== [I] Persist settings.json with workspaces_root_override ====
+[I] cat C:\Users\<user>\AppData\Local\flow\settings.json:
+---8<--- C:\Users\<user>\AppData\Local\flow\settings.json
+{
+  "claude_cli_path": "C:\\Users\\<user>\\.local\\bin\\claude.exe",
+  "codex_cli_path": "E:\\develop\\nodejs\\codex.cmd",
+  "workspaces_root_override": "D:\\flow-workspaces-evidence",
+  "default_profile": "dev",
+  "default_mode": "auto"
+}
+--->8---
+[I] new task workspace: D:\flow-workspaces-evidence\7fae04b9-a1fb-4f11-85ab-b95e3690e7ac
+[I] starts_with(D:\flow-workspaces-evidence)? true
+[I] PASS — settings persisted, new workspace landed under override
