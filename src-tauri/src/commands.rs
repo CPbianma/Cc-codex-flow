@@ -264,6 +264,80 @@ pub async fn get_task_state(id: String) -> Result<String> {
     Ok(std::fs::read_to_string(&path)?)
 }
 
+/// Force-delete a task: clear the DB row and archive the on-disk workspace.
+///
+/// If the FSM is mid-run we don't wait for it to settle. We:
+///   1. raise `abort.flag` + clear `paused` so the orchestrator unwinds at its
+///      next poll,
+///   2. on Windows, taskkill any subprocess whose CommandLine references the
+///      workspace path (claude/codex CLI children) so the rename doesn't hit a
+///      sharing violation,
+///   3. delete the DB row first (the task disappears from the list immediately
+///      — visual progress for the user),
+///   4. best-effort archive the workspace into `<root>/_archive/<ts>-<slug>/`,
+///      stripping `meta/`, `discussion/`, `CLAUDE.md`, `AGENTS.md`,
+///      `mcp.shared.json`. One retry with another subprocess sweep if the
+///      first rename fails. Archive failure is logged, not propagated — the
+///      task is already gone from the UI.
+#[tauri::command]
+pub async fn delete_task(id: String) -> Result<()> {
+    let task = Task::get(&id)?;
+    let ws = std::path::PathBuf::from(&task.workspace_path);
+
+    if ws.exists() {
+        let meta = ws.join("meta");
+        if meta.exists() {
+            let _ = std::fs::write(
+                meta.join("abort.flag"),
+                chrono::Utc::now().to_rfc3339(),
+            );
+            let _ = std::fs::write(
+                meta.join("control.json"),
+                serde_json::to_string(&serde_json::json!({ "paused": false }))?,
+            );
+        }
+        kill_subprocesses_using_workspace(&task.workspace_path);
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    }
+
+    Task::delete(&id)?;
+
+    if ws.exists() {
+        if let Err(e) = workspace::archive_workspace(&ws, &task.intent) {
+            kill_subprocesses_using_workspace(&task.workspace_path);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if let Err(e2) = workspace::archive_workspace(&ws, &task.intent) {
+                tracing::warn!(
+                    task_id = %id,
+                    first = %e,
+                    second = %e2,
+                    "archive failed twice; workspace folder retained on disk"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Windows-only: kill any process whose CommandLine references the workspace
+/// path. Used by [`delete_task`] to free the directory before rename.
+///
+/// Best-effort: a single PowerShell invocation, no error propagation.
+#[cfg(windows)]
+fn kill_subprocesses_using_workspace(ws_path: &str) {
+    let escaped = ws_path.replace('\'', "''");
+    let script = format!(
+        "Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{}*' }} | ForEach-Object {{ try {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop }} catch {{}} }}",
+        escaped
+    );
+    let _ = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output();
+}
+
+#[cfg(not(windows))]
+fn kill_subprocesses_using_workspace(_ws_path: &str) {}
+
 /// Human-in-the-loop intervention. Records the action against the
 /// workspace; the FSM picks it up on its next iteration (Phase-3 wiring).
 ///

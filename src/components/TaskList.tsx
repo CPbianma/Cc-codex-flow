@@ -5,9 +5,10 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
+  onDelete: (task: Task) => void;
 }
 
-export function TaskList({ tasks, selectedId, onSelect, onNew }: Props) {
+export function TaskList({ tasks, selectedId, onSelect, onNew, onDelete }: Props) {
   return (
     <div className="pane pane-left">
       <div className="pane-header">
@@ -41,6 +42,18 @@ export function TaskList({ tasks, selectedId, onSelect, onNew }: Props) {
                   <span className="badge">{t.mode}</span>
                   <span className="badge state">{t.state}</span>
                 </div>
+                <button
+                  type="button"
+                  className="task-delete"
+                  title="删除任务（产物归档到 _archive/）"
+                  aria-label="删除任务"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(t);
+                  }}
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>

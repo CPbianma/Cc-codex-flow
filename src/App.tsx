@@ -58,6 +58,24 @@ export default function App() {
     }
   };
 
+  const handleDelete = async (task: Task) => {
+    const ok = window.confirm(
+      `确定删除「${task.intent}」？\n\n` +
+        "• 任务从列表移除\n" +
+        "• 产物归档到 _archive/<时间戳>-<前缀>/（保留 intent / decisions / execution / artifacts）\n" +
+        "• 如果正在运行，会强制中止 claude/codex 子进程\n\n" +
+        "此操作不可撤销。"
+    );
+    if (!ok) return;
+    try {
+      await api.deleteTask(task.id);
+      if (selectedId === task.id) setSelectedId(null);
+      await refresh();
+    } catch (e: any) {
+      setError(String(e));
+    }
+  };
+
   return (
     <div className="app">
       <header className="topbar">
@@ -86,6 +104,7 @@ export default function App() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           onNew={() => setDialogOpen(true)}
+          onDelete={handleDelete}
         />
         <ThreadView task={selectedTask} onNewTask={() => setDialogOpen(true)} />
         <WorkspacePane

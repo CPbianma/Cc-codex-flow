@@ -118,6 +118,16 @@ impl Task {
         })
     }
 
+    /// Remove a task row by id. Best-effort — silently succeeds if the id
+    /// is unknown (DELETE matches 0 rows). Workspace cleanup is the caller's
+    /// responsibility.
+    pub fn delete(id: &str) -> Result<()> {
+        with_conn(|c| {
+            c.execute("DELETE FROM tasks WHERE id = ?1", [id])?;
+            Ok(())
+        })
+    }
+
     pub fn get(id: &str) -> Result<Task> {
         with_conn(|c| {
             let mut stmt = c.prepare(

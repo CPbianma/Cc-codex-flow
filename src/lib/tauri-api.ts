@@ -59,4 +59,5 @@ export const api = {
   intervene: (id: string, action: string) =>
     invoke<void>("intervene", { id, action }),
   resetTask: (id: string) => invoke<void>("reset_task", { id }),
+  deleteTask: (id: string) => invoke<void>("delete_task", { id }),
 };

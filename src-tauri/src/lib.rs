@@ -1,5 +1,6 @@
 pub mod adapter;
 pub mod bridge;
+#[cfg(not(test))]
 pub mod commands;
 pub mod error;
 pub mod orchestrator;
@@ -13,6 +14,11 @@ use std::path::PathBuf;
 
 use store::task::Task;
 
+// Gate `run()` out of `--test` builds: the body links the Tauri runtime +
+// generate_context! macro expansion, which on this toolchain produces a
+// `STATUS_ENTRYPOINT_NOT_FOUND` load failure in the test exe. main.rs is the
+// only caller and is never built under `--test`, so this is safe.
+#[cfg(not(test))]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -48,6 +54,7 @@ pub fn run() {
             commands::start_task,
             commands::get_task_state,
             commands::intervene,
+            commands::delete_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -21,6 +21,17 @@ use crate::error::{AppError, Result};
 use crate::profile::{Profile, RoleSpec};
 use crate::store::task::Task;
 
+// Conditional alias for the Tauri event-emitter handle. In production builds
+// it carries the real `tauri::AppHandle`; under `#[cfg(test)]` it collapses to
+// `()` so the test exe doesn't link Tauri's WebView2 runtime (which on this
+// toolchain produced a `STATUS_ENTRYPOINT_NOT_FOUND` load failure). The emit
+// site in `transition()` is gated with the matching `#[cfg(not(test))]` so
+// the `()` placeholder is never asked to emit anything.
+#[cfg(not(test))]
+pub type FsmAppHandle = Option<tauri::AppHandle>;
+#[cfg(test)]
+pub type FsmAppHandle = Option<()>;
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FsmState {
     Pending,
@@ -73,7 +84,7 @@ pub struct Orchestrator {
     pub mode: String,
     pub claude: Arc<dyn AgentAdapter>,
     pub codex: Arc<dyn AgentAdapter>,
-    pub app_handle: Option<tauri::AppHandle>,
+    pub app_handle: FsmAppHandle,
     pub state: FsmState,
     pub history: Vec<String>,
     pub last_error: Option<String>,
@@ -87,7 +98,7 @@ impl Orchestrator {
         mode: String,
         claude: Arc<dyn AgentAdapter>,
         codex: Arc<dyn AgentAdapter>,
-        app_handle: Option<tauri::AppHandle>,
+        app_handle: FsmAppHandle,
     ) -> Self {
         Self {
             task,
@@ -452,6 +463,7 @@ impl Orchestrator {
         self.state = next;
         self.history.push(next.as_str().to_string());
         self.persist_state()?;
+        #[cfg(not(test))]
         if let Some(h) = &self.app_handle {
             // Tauri event — best-effort; we don't fail the FSM if emit fails.
             use tauri::Emitter;
