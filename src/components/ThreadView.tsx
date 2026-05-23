@@ -81,6 +81,17 @@ export function ThreadView({ task, onNewTask }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
+  const [toast, setToast] = useState<{ msg: string; kind: "ok" | "err" } | null>(
+    null
+  );
+  const [streamTail, setStreamTail] = useState<string | null>(null);
+
+  // Auto-dismiss toast after 2500ms.
+  useEffect(() => {
+    if (!toast) return;
+    const h = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(h);
+  }, [toast]);
 
   // Reset transient UI when switching task.
   useEffect(() => {
@@ -90,6 +101,8 @@ export function ThreadView({ task, onNewTask }: Props) {
     setArtifacts({});
     setTurns([]);
     setFsm(null);
+    setStreamTail(null);
+    setToast(null);
   }, [task?.id]);
 
   // Poll state.json + turns.jsonl every 1.5s.
@@ -209,6 +222,33 @@ export function ThreadView({ task, onNewTask }: Props) {
     return !turns.some((t) => t.turn_id === latestTurnSuffix);
   }, [latestTurnSuffix, turns]);
 
+  // Poll the in-flight turn's streaming jsonl tail.
+  useEffect(() => {
+    if (!task || !streamingPending || !latestTurnSuffix) {
+      setStreamTail(null);
+      return;
+    }
+    let cancelled = false;
+    const path = `meta/turns/${latestTurnSuffix}.stream.jsonl`;
+    const tick = async () => {
+      try {
+        const raw = await api.readWorkspaceFile(task.id, path);
+        if (cancelled) return;
+        // Keep only the last 4KB.
+        const tail = raw.length > 4096 ? raw.slice(raw.length - 4096) : raw;
+        setStreamTail(tail);
+      } catch {
+        if (!cancelled) setStreamTail(null);
+      }
+    };
+    tick();
+    const h = setInterval(tick, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(h);
+    };
+  }, [task?.id, streamingPending, latestTurnSuffix]);
+
   if (!task) {
     return (
       <div className="pane pane-center">
@@ -271,18 +311,32 @@ export function ThreadView({ task, onNewTask }: Props) {
     setError(null);
     try {
       await api.startTask(task.id);
+      setToast({ msg: "已启动任务", kind: "ok" });
     } catch (e: any) {
       setError(String(e));
+      setToast({ msg: `启动失败：${String(e)}`, kind: "err" });
     } finally {
       setStarting(false);
     }
   };
 
+  const ACTION_TOAST: Record<string, string> = {
+    pause: "已发送暂停信号",
+    resume: "已发送继续信号",
+    retry: "已发送重试信号",
+    abort: "已发送中止信号",
+  };
+
   const runIntervene = async (action: string) => {
     try {
       await api.intervene(task.id, action);
+      const key = action.startsWith("feedback:") ? "feedback" : action;
+      const msg =
+        key === "feedback" ? "已发送反馈" : ACTION_TOAST[key] ?? `已发送：${action}`;
+      setToast({ msg, kind: "ok" });
     } catch (e: any) {
       setError(String(e));
+      setToast({ msg: `操作失败：${String(e)}`, kind: "err" });
     }
   };
 
@@ -295,13 +349,19 @@ export function ThreadView({ task, onNewTask }: Props) {
   };
 
   const reset = async () => {
+    const ok = window.confirm(
+      "确定要重置该任务吗？保留 decisions/execution/artifacts，但清空 FSM 状态。"
+    );
+    if (!ok) return;
     try {
       await api.resetTask(task.id);
       setArtifacts({});
       setTurns([]);
       setFsm({ state: "Pending", round: 0, history: [] });
+      setToast({ msg: "已重置", kind: "ok" });
     } catch (e: any) {
       setError(String(e));
+      setToast({ msg: `重置失败：${String(e)}`, kind: "err" });
     }
   };
 
@@ -310,16 +370,30 @@ export function ThreadView({ task, onNewTask }: Props) {
   const showResume = currentState === "NeedsHuman";
   const showRetry = phase === "Executing" || phase === "Reviewing";
   const showFeedback = isRunning || currentState === "NeedsHuman";
-  const showReset = isTerminal;
+  // Reset is always available — pending, running, or terminal.
+  const showReset = true;
   const showAbort = isRunning;
 
   return (
     <div className="pane pane-center">
+      {toast && (
+        <div className={`flow-toast ${toast.kind === "err" ? "err" : "ok"}`}>
+          {toast.msg}
+        </div>
+      )}
       <div className="pane-header">
         <div className="thread-title">
           <span className="badge state">{currentState}</span>
           {fsm?.round != null && fsm.round > 0 && (
             <span className="badge">R{fsm.round}</span>
+          )}
+          {fsm?.error && (
+            <span
+              className="badge err-badge"
+              title={fsm.error}
+            >
+              错误: {fsm.error.slice(0, 40)}
+            </span>
           )}
           <span className="thread-title-text" title={task.id}>
             {task.intent}
@@ -333,6 +407,7 @@ export function ThreadView({ task, onNewTask }: Props) {
                 className="btn-mini primary"
                 disabled={starting}
                 onClick={start}
+                title="启动任务（开始 R1：决策 → 执行 → 审查）"
               >
                 {starting ? "启动中…" : "▶ 启动"}
               </button>
@@ -350,7 +425,7 @@ export function ThreadView({ task, onNewTask }: Props) {
               <button
                 className="btn-mini"
                 onClick={() => runIntervene("resume")}
-                title="清除暂停标志"
+                title="清除暂停标志，让 FSM 继续运行"
               >
                 继续
               </button>
@@ -368,7 +443,7 @@ export function ThreadView({ task, onNewTask }: Props) {
               <button
                 className="btn-mini"
                 onClick={() => setFeedbackOpen((v) => !v)}
-                title="给下一轮反馈"
+                title="为下一轮添加反馈（写入 meta/feedback.jsonl）"
               >
                 给下一轮反馈…
               </button>
@@ -377,7 +452,7 @@ export function ThreadView({ task, onNewTask }: Props) {
               <button
                 className="btn-mini"
                 onClick={reset}
-                title="重置为 Pending（保留 decisions/execution/artifacts）"
+                title="重置为 Pending（保留 decisions/execution/artifacts，仅清空 FSM 状态）"
               >
                 重置为 Pending
               </button>
@@ -386,7 +461,7 @@ export function ThreadView({ task, onNewTask }: Props) {
               <button
                 className="btn-mini"
                 onClick={() => runIntervene("abort")}
-                title="中止当前任务"
+                title="中止当前任务（写入 meta/control.json abort=true）"
               >
                 中止
               </button>
@@ -605,9 +680,13 @@ export function ThreadView({ task, onNewTask }: Props) {
                 <span style={{ fontWeight: 500 }}>{currentState}</span>
                 <span className="dim">流式输出中…</span>
               </div>
-              <div className="turn-body streaming-body">
-                Agent 正在工作，工件还未落盘。完成后会自动出现在这里。
-              </div>
+              {streamTail ? (
+                <pre className="streaming-tail">{streamTail}</pre>
+              ) : (
+                <div className="turn-body streaming-body">
+                  Agent 正在工作，工件还未落盘。完成后会自动出现在这里。
+                </div>
+              )}
             </div>
           )}
 

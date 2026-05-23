@@ -84,6 +84,40 @@ impl Task {
         })
     }
 
+    /// Enumerate every task in the database (no limit). Used at startup
+    /// for orphan-task recovery — see `lib.rs::recover_orphan_tasks`.
+    pub fn list_all() -> Result<Vec<Task>> {
+        with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, intent, profile, mode, state, workspace_path, created_at, updated_at
+                 FROM tasks ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(Task {
+                    id: row.get(0)?,
+                    intent: row.get(1)?,
+                    profile: row.get(2)?,
+                    mode: row.get(3)?,
+                    state: row.get(4)?,
+                    workspace_path: row.get(5)?,
+                    created_at: row
+                        .get::<_, String>(6)?
+                        .parse::<DateTime<Utc>>()
+                        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e)))?,
+                    updated_at: row
+                        .get::<_, String>(7)?
+                        .parse::<DateTime<Utc>>()
+                        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e)))?,
+                })
+            })?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
     pub fn get(id: &str) -> Result<Task> {
         with_conn(|c| {
             let mut stmt = c.prepare(

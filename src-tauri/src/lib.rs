@@ -9,6 +9,10 @@ mod settings;
 mod store;
 mod workspace;
 
+use std::path::PathBuf;
+
+use store::task::Task;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -20,6 +24,13 @@ pub fn run() {
 
     paths::init_paths().expect("failed to init app paths");
     store::init().expect("failed to init sqlite");
+
+    // [E] Orphan task recovery: this fresh process has no live orchestrators,
+    // so any non-terminal task on disk is by definition orphaned.
+    match recover_orphan_tasks() {
+        Ok(n) => tracing::info!(recovered = n, "orphan task recovery complete"),
+        Err(e) => tracing::warn!(error = %e, "orphan task recovery failed"),
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -40,4 +51,65 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Scan every task in the database and mark non-terminal ones as Failed
+/// with the reason "孤儿任务". Returns the number of tasks recovered.
+fn recover_orphan_tasks() -> error::Result<usize> {
+    let tasks = Task::list_all()?;
+    let mut count = 0usize;
+    for task in tasks {
+        let ws = PathBuf::from(&task.workspace_path);
+        if ws.as_os_str().is_empty() || !ws.exists() {
+            continue;
+        }
+        let state_path = ws.join("meta").join("state.json");
+        if !state_path.exists() {
+            continue;
+        }
+        let raw = match std::fs::read_to_string(&state_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let val: serde_json::Value = match serde_json::from_str(&raw) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let state = val
+            .get("state")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        if matches!(state.as_str(), "Done" | "Failed" | "NeedsHuman" | "Pending") {
+            continue;
+        }
+        // Preserve history and append "Failed".
+        let mut history: Vec<String> = val
+            .get("history")
+            .and_then(|h| h.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        history.push("Failed".to_string());
+        let new_payload = serde_json::json!({
+            "state": "Failed",
+            "round": 0,
+            "history": history,
+            "error": "孤儿任务",
+        });
+        // Best-effort write.
+        if let Err(e) = std::fs::write(
+            &state_path,
+            serde_json::to_string_pretty(&new_payload).unwrap_or_default(),
+        ) {
+            tracing::warn!(task_id = %task.id, error = %e, "failed to write state.json");
+            continue;
+        }
+        let _ = val; // keep `val` from being dead in non-trace builds
+        count += 1;
+    }
+    Ok(count)
 }

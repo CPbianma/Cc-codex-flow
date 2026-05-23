@@ -1,9 +1,9 @@
-//! Phase-2 FSM driver.
+//! Phase-3 FSM driver.
 //!
-//! For Phase 2 the reviewer step always returns "pass" — see TODO below.
-//! The full plan walks rounds R1 → R2 → R3 (with role swap) → R4 (human),
-//! but until we wire real review parsing we just run R1 to completion in
-//! auto mode.
+//! Walks rounds R1 → R2 → R3 (with role swap) → R4 (human gate),
+//! parses real reviewer verdicts from `decisions/{n:03}-review.md`,
+//! and honours intervention signals written to `meta/` by the
+//! `intervene` Tauri command (pause / abort / retry / feedback).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -77,6 +77,7 @@ pub struct Orchestrator {
     pub state: FsmState,
     pub history: Vec<String>,
     pub last_error: Option<String>,
+    pub pending_feedback: Option<String>,
 }
 
 impl Orchestrator {
@@ -98,6 +99,7 @@ impl Orchestrator {
             state: FsmState::Pending,
             history: Vec::new(),
             last_error: None,
+            pending_feedback: None,
         }
     }
 
@@ -120,6 +122,11 @@ impl Orchestrator {
     async fn run_inner(&mut self) -> Result<()> {
         self.transition(FsmState::R1Deciding).await?;
         loop {
+            // [D] Poll intervention signals before every step.
+            if self.check_interventions().await? {
+                // Aborted — terminal state already set, exit loop.
+                return Ok(());
+            }
             let prev = self.state;
             self.step().await?;
             if matches!(
@@ -134,6 +141,97 @@ impl Orchestrator {
             }
         }
         Ok(())
+    }
+
+    /// Poll `<workspace>/meta/` for `control.json` (pause), `abort.flag`,
+    /// `retry.flag`, and `feedback.jsonl`. Returns Ok(true) if the FSM was
+    /// aborted (caller should exit the loop).
+    async fn check_interventions(&mut self) -> Result<bool> {
+        let meta = PathBuf::from(&self.task.workspace_path).join("meta");
+
+        // Pause: spin until cleared.
+        loop {
+            let control = meta.join("control.json");
+            let paused = if control.exists() {
+                std::fs::read_to_string(&control)
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                    .and_then(|v| v.get("paused").and_then(|p| p.as_bool()))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            if !paused {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+
+        // Abort.
+        let abort = meta.join("abort.flag");
+        if abort.exists() {
+            let _ = std::fs::remove_file(&abort);
+            self.last_error = Some("用户中止".into());
+            self.transition(FsmState::Failed).await?;
+            return Ok(true);
+        }
+
+        // Retry: rewind Executing/Reviewing back to Deciding of the same round.
+        let retry = meta.join("retry.flag");
+        if retry.exists() {
+            let _ = std::fs::remove_file(&retry);
+            let new_state = match self.state {
+                FsmState::R1Executing | FsmState::R1Reviewing => Some(FsmState::R1Deciding),
+                FsmState::R2Executing | FsmState::R2Reviewing => Some(FsmState::R2Deciding),
+                FsmState::R3Executing | FsmState::R3Reviewing => Some(FsmState::R3Deciding),
+                FsmState::R1Deciding | FsmState::R2Deciding | FsmState::R3Deciding => None,
+                _ => None,
+            };
+            if let Some(s) = new_state {
+                self.transition(s).await?;
+            }
+        }
+
+        // Feedback: pull unread entries via byte-offset cursor.
+        let feedback = meta.join("feedback.jsonl");
+        if feedback.exists() {
+            let cursor_path = meta.join("feedback.cursor");
+            let cursor: u64 = std::fs::read_to_string(&cursor_path)
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0);
+            let full = std::fs::read(&feedback)?;
+            let total_len = full.len() as u64;
+            if total_len > cursor {
+                let tail = &full[cursor as usize..];
+                let mut parts: Vec<String> = Vec::new();
+                for line in tail.split(|b| *b == b'\n') {
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let s = match std::str::from_utf8(line) {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+                        if let Some(t) = v.get("text").and_then(|x| x.as_str()) {
+                            parts.push(t.to_string());
+                        }
+                    }
+                }
+                if !parts.is_empty() {
+                    let combined = parts.join("\n---\n");
+                    // Append to any pre-existing pending feedback so nothing is lost.
+                    self.pending_feedback = Some(match self.pending_feedback.take() {
+                        Some(prev) => format!("{prev}\n---\n{combined}"),
+                        None => combined,
+                    });
+                }
+                std::fs::write(&cursor_path, total_len.to_string())?;
+            }
+        }
+
+        Ok(false)
     }
 
     /// Advance the FSM by exactly one state.
@@ -183,6 +281,11 @@ impl Orchestrator {
     }
 
     async fn run_role(&mut self, round: u32, role: Role) -> Result<bool> {
+        // Clear any prior reviewer-FAIL reason; it only belongs to its own round.
+        if !matches!(role, Role::Reviewer) {
+            self.last_error = None;
+        }
+
         let spec = self.spec_for(round, role);
         let agent_id = spec.agent;
         let adapter: Arc<dyn AgentAdapter> = match agent_id {
@@ -205,11 +308,21 @@ impl Orchestrator {
 
         let turn_id = format!("r{round}-{}", role_short(role));
         let mcp = workspace.join("mcp.shared.json");
+
+        // Build the user message. If we are entering the Decider and have
+        // pending user feedback, prepend it and clear.
+        let mut user_message = build_user_message(role, round, &self.task.intent);
+        if matches!(role, Role::Decider) {
+            if let Some(fb) = self.pending_feedback.take() {
+                user_message = format!("用户上一轮的反馈：\n{fb}\n\n{user_message}");
+            }
+        }
+
         let req = InvokeRequest {
             workspace: workspace.clone(),
             role,
             system_prompt: rendered,
-            user_message: build_user_message(role, round, &self.task.intent),
+            user_message,
             permission: self.profile.default_permission,
             mcp_config_path: if mcp.exists() { Some(mcp) } else { None },
             turn_id: turn_id.clone(),
@@ -219,11 +332,19 @@ impl Orchestrator {
         let resp = adapter.invoke(req).await?;
         self.append_turn(&turn_id, round, role, agent_id, started, &resp)?;
 
-        // TODO(phase-3): parse `decisions/{n}-review.md` for "Verdict: pass"
-        // and feed it back. For now any reviewer step counts as pass so the
-        // FSM can complete end-to-end during development.
+        // [C] Reviewer verdict: parse decisions/{n:03}-review.md.
         if matches!(role, Role::Reviewer) {
-            return Ok(true);
+            let review_path = workspace
+                .join("decisions")
+                .join(format!("{:03}-review.md", round));
+            let (pass, reason) = parse_review_verdict(&review_path);
+            if pass {
+                self.last_error = None;
+                return Ok(true);
+            } else {
+                self.last_error = Some(reason);
+                return Ok(false);
+            }
         }
         Ok(false)
     }
@@ -385,3 +506,32 @@ fn build_user_message(role: Role, round: u32, intent: &str) -> String {
 // Silence unused warnings if a binary is built without using Permission.
 #[allow(dead_code)]
 fn _permission_static_check(_: Permission) {}
+
+/// Parse a reviewer verdict from a review file. The first non-empty,
+/// non-whitespace line must start with `PASS` (case-insensitive) or
+/// `FAIL:<reason>` (case-insensitive, colon required).
+///
+/// Returns `(pass, reason)`. `reason` is empty when `pass == true`.
+fn parse_review_verdict(path: &std::path::Path) -> (bool, String) {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return (false, "review file not found".into()),
+    };
+    let first = content
+        .lines()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty());
+    let first = match first {
+        Some(l) => l,
+        None => return (false, "first line is not PASS / FAIL:<reason>".into()),
+    };
+    let upper = first.to_ascii_uppercase();
+    if upper.starts_with("PASS") {
+        return (true, String::new());
+    }
+    if upper.starts_with("FAIL:") {
+        let reason = first[5..].trim().to_string();
+        return (false, reason);
+    }
+    (false, "first line is not PASS / FAIL:<reason>".into())
+}

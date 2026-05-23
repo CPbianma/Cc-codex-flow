@@ -111,6 +111,12 @@ impl AgentAdapter for CodexAdapter {
             "experimental_instructions_file={}",
             agents_md.to_string_lossy()
         ));
+
+        // Inject MCP servers from <workspace>/mcp.shared.json (Claude-style
+        // `mcpServers` map) as Codex `-c mcp_servers.<name>.…` overrides.
+        // Silently skip if the file is missing or malformed.
+        inject_mcp_servers(&req.workspace, &mut args);
+
         args.push("--".into());
         args.push(req.user_message.clone());
 
@@ -223,6 +229,93 @@ fn collect_artifacts(workspace: &Path, since: SystemTime) -> Result<Vec<PathBuf>
     walk_for_artifacts(workspace, workspace, since, &mut out)?;
     out.sort();
     Ok(out)
+}
+
+/// Read `<workspace>/mcp.shared.json` and translate its `mcpServers` map into
+/// Codex `-c mcp_servers.<name>.<key>=<toml-value>` overrides appended to
+/// `args`. Silently no-ops if the file is missing or invalid.
+fn inject_mcp_servers(workspace: &Path, args: &mut Vec<String>) {
+    let path = workspace.join("mcp.shared.json");
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let root: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let servers = match root.get("mcpServers").and_then(|v| v.as_object()) {
+        Some(m) => m,
+        None => return,
+    };
+
+    for (name, spec) in servers {
+        let spec_obj = match spec.as_object() {
+            Some(o) => o,
+            None => continue,
+        };
+
+        if let Some(cmd) = spec_obj.get("command").and_then(|v| v.as_str()) {
+            args.push("-c".into());
+            args.push(format!(
+                "mcp_servers.{}.command={}",
+                name,
+                toml_string(cmd)
+            ));
+        } else {
+            // command is required for a usable mcp server entry
+            continue;
+        }
+
+        if let Some(arr) = spec_obj.get("args").and_then(|v| v.as_array()) {
+            let parts: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(toml_string))
+                .collect();
+            args.push("-c".into());
+            args.push(format!(
+                "mcp_servers.{}.args=[{}]",
+                name,
+                parts.join(", ")
+            ));
+        }
+
+        if let Some(env_obj) = spec_obj.get("env").and_then(|v| v.as_object()) {
+            for (k, v) in env_obj {
+                if let Some(s) = v.as_str() {
+                    args.push("-c".into());
+                    args.push(format!(
+                        "mcp_servers.{}.env.{}={}",
+                        name,
+                        k,
+                        toml_string(s)
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// Encode a Rust string as a TOML basic string literal: wrap in double quotes
+/// and escape backslash, double-quote, and common control characters.
+fn toml_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04X}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn walk_for_artifacts(
