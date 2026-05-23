@@ -1,13 +1,13 @@
-mod adapter;
-mod bridge;
-mod commands;
-mod error;
-mod orchestrator;
-mod paths;
-mod profile;
-mod settings;
-mod store;
-mod workspace;
+pub mod adapter;
+pub mod bridge;
+pub mod commands;
+pub mod error;
+pub mod orchestrator;
+pub mod paths;
+pub mod profile;
+pub mod settings;
+pub mod store;
+pub mod workspace;
 
 use std::path::PathBuf;
 

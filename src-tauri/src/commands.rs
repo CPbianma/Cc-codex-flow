@@ -136,6 +136,13 @@ pub async fn set_workspaces_root(path: String) -> Result<SettingsView> {
 /// `meta/state.json` and `meta/turns.jsonl` but deliberately keep
 /// `decisions/`, `execution/`, `discussion/`, `artifacts/` and `intent.md`
 /// — the user might still want them as reference.
+///
+/// Race-safety: a running orchestrator periodically writes `state.json` from
+/// its in-memory FSM, so a naive reset can be silently clobbered. We first
+/// drop an `abort.flag` (the orchestrator's intervention poll picks this up
+/// within ~half a turn and transitions itself to `Failed`), then refuse the
+/// reset unless the persisted `state.json` is in a terminal state. The
+/// frontend retries / surfaces the error.
 #[tauri::command]
 pub async fn reset_task(id: String) -> Result<()> {
     let task = Task::get(&id)?;
@@ -144,8 +151,35 @@ pub async fn reset_task(id: String) -> Result<()> {
     if !meta.exists() {
         std::fs::create_dir_all(&meta)?;
     }
+
+    // Inspect current persisted state; bail out (after raising the abort
+    // flag) if the FSM is mid-run so we don't race the orchestrator.
+    let state_path = meta.join("state.json");
+    if state_path.exists() {
+        let raw = std::fs::read_to_string(&state_path)?;
+        let cur: serde_json::Value =
+            serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+        let state_str = cur
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Pending")
+            .to_string();
+        let is_terminal = matches!(
+            state_str.as_str(),
+            "Pending" | "Done" | "Failed" | "NeedsHuman"
+        );
+        if !is_terminal {
+            // Signal abort so the orchestrator unwinds itself, then ask the
+            // caller to retry once the FSM has settled.
+            std::fs::write(meta.join("abort.flag"), chrono::Utc::now().to_rfc3339())?;
+            return Err(AppError::Other(format!(
+                "任务正在运行中（{state_str}），已发送中止信号，请稍候再试"
+            )));
+        }
+    }
+
     std::fs::write(
-        meta.join("state.json"),
+        &state_path,
         serde_json::to_string_pretty(&serde_json::json!({
             "state": "Pending",
             "round": 0,
@@ -154,6 +188,13 @@ pub async fn reset_task(id: String) -> Result<()> {
     )?;
     // Truncate (don't delete) the turn log.
     std::fs::write(meta.join("turns.jsonl"), "")?;
+    // Clear stale control / feedback cursors so the next run starts clean.
+    for stale in ["abort.flag", "retry.flag", "feedback.cursor", "control.json"] {
+        let p = meta.join(stale);
+        if p.exists() {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
     Ok(())
 }
 
