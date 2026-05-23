@@ -146,7 +146,7 @@ impl Orchestrator {
     /// Poll `<workspace>/meta/` for `control.json` (pause), `abort.flag`,
     /// `retry.flag`, and `feedback.jsonl`. Returns Ok(true) if the FSM was
     /// aborted (caller should exit the loop).
-    async fn check_interventions(&mut self) -> Result<bool> {
+    pub async fn check_interventions(&mut self) -> Result<bool> {
         let meta = PathBuf::from(&self.task.workspace_path).join("meta");
 
         // Pause: spin until cleared.

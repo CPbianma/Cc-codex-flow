@@ -63,3 +63,15 @@ path = "examples/e2e_dev.rs"
 [[example]]
 name = "e2e_visual"
 path = "examples/e2e_visual.rs"
+
+[[example]]
+name = "demo_orphan"
+path = "examples/demo_orphan.rs"
+
+[[example]]
+name = "demo_intervene"
+path = "examples/demo_intervene.rs"
+
+[[example]]
+name = "demo_settings"
+path = "examples/demo_settings.rs"

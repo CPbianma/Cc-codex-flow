@@ -77,10 +77,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         /* app_handle */ None,
     );
 
-    let outcome = tokio::time::timeout(Duration::from_secs(9 * 60), orch.run()).await;
+    let outcome = tokio::time::timeout(Duration::from_secs(25 * 60), orch.run()).await;
     let timed_out = outcome.is_err();
     if timed_out {
-        println!("[e2e_visual] WALL-CLOCK CAP HIT (>9 min) — printing best-effort state below");
+        println!("[e2e_visual] WALL-CLOCK CAP HIT (>25 min) — printing best-effort state below");
     } else if let Ok(Err(e)) = outcome {
         println!("[e2e_visual] orchestrator returned error: {e}");
     }

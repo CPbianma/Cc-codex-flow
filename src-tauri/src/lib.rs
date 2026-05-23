@@ -55,7 +55,7 @@ pub fn run() {
 
 /// Scan every task in the database and mark non-terminal ones as Failed
 /// with the reason "孤儿任务". Returns the number of tasks recovered.
-fn recover_orphan_tasks() -> error::Result<usize> {
+pub fn recover_orphan_tasks() -> error::Result<usize> {
     let tasks = Task::list_all()?;
     Ok(recover_orphan_tasks_from(&tasks))
 }

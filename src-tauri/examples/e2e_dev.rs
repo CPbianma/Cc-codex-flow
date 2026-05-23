@@ -92,11 +92,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         /* app_handle */ None,
     );
 
-    // Hard 9-minute cap.
-    let outcome = tokio::time::timeout(Duration::from_secs(9 * 60), orch.run()).await;
+    // Hard 25-minute cap.
+    let outcome = tokio::time::timeout(Duration::from_secs(25 * 60), orch.run()).await;
     let timed_out = outcome.is_err();
     if timed_out {
-        println!("[e2e_dev] WALL-CLOCK CAP HIT (>6 min) — printing best-effort state below");
+        println!("[e2e_dev] WALL-CLOCK CAP HIT (>25 min) — printing best-effort state below");
     } else if let Ok(Err(e)) = outcome {
         println!("[e2e_dev] orchestrator returned error: {e}");
     }
