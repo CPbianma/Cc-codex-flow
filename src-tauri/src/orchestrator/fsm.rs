@@ -532,8 +532,12 @@ fn build_user_message(role: Role, round: u32, intent: &str) -> String {
 fn _permission_static_check(_: Permission) {}
 
 /// Parse a reviewer verdict from a review file. The first non-empty,
-/// non-whitespace line must start with `PASS` (case-insensitive) or
-/// `FAIL:<reason>` (case-insensitive, colon required).
+/// non-whitespace, non-Markdown-heading line must start with `PASS`
+/// (case-insensitive) or `FAIL:<reason>` (case-insensitive, colon required).
+///
+/// Markdown headings (lines starting with `#`) are skipped — Claude has a
+/// strong habit of prepending titles like `# 001 · Reviewer (Round 1)` even
+/// when the template forbids it.
 ///
 /// Returns `(pass, reason)`. `reason` is empty when `pass == true`.
 fn parse_review_verdict(path: &std::path::Path) -> (bool, String) {
@@ -544,7 +548,7 @@ fn parse_review_verdict(path: &std::path::Path) -> (bool, String) {
     let first = content
         .lines()
         .map(|l| l.trim())
-        .find(|l| !l.is_empty());
+        .find(|l| !l.is_empty() && !l.starts_with('#'));
     let first = match first {
         Some(l) => l,
         None => return (false, "first line is not PASS / FAIL:<reason>".into()),
@@ -707,6 +711,36 @@ mod tests {
         let (pass, reason) = parse_review_verdict(&p);
         assert!(!pass);
         assert!(reason.contains("PASS") || reason.contains("FAIL"), "got: {reason}");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn verdict_pass_after_markdown_heading() {
+        // Claude likes to prepend a `# Title` even when the template forbids
+        // it. The parser must look past such headings to find the real verdict.
+        let ws = fresh_workspace("verdict-pass-heading");
+        let p = write_review(
+            &ws,
+            1,
+            "# 001 · Reviewer (Round 1)\n\nPASS\n\n## Verdict summary\n\nok\n",
+        );
+        let (pass, reason) = parse_review_verdict(&p);
+        assert!(pass, "expected PASS past leading markdown heading; reason: {reason}");
+        assert!(reason.is_empty());
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn verdict_fail_after_markdown_heading() {
+        let ws = fresh_workspace("verdict-fail-heading");
+        let p = write_review(
+            &ws,
+            1,
+            "## Review\n\nFAIL: missing tests\nnotes\n",
+        );
+        let (pass, reason) = parse_review_verdict(&p);
+        assert!(!pass);
+        assert!(reason.contains("missing tests"), "got: {reason}");
         let _ = std::fs::remove_dir_all(&ws);
     }
 
