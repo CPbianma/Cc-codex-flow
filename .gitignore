@@ -16,6 +16,11 @@ dist
 dist-ssr
 *.local
 
+# Scratch prompts handed to other tools (codex, etc.) — never commit
+.codex-prompt.txt
+.claude-prompt.txt
+prompt-*.txt
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
