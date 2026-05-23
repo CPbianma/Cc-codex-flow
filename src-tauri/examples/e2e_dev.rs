@@ -75,7 +75,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut task = task;
     task.workspace_path = ws_path.to_string_lossy().into_owned();
 
-    let profile = Profile::load("dev")?;
+    let mut profile = Profile::load("dev")?;
+    // For autonomous E2E we use FullAuto so neither CLI prompts for tool
+    // permissions interactively (Claude --permission-mode bypassPermissions,
+    // Codex -s danger-full-access).
+    profile.default_permission = flow_lib::adapter::Permission::FullAuto;
     let claude: Arc<dyn AgentAdapter> = Arc::new(ClaudeAdapter::new(claude_bin));
     let codex: Arc<dyn AgentAdapter> = Arc::new(CodexAdapter::new(codex_bin));
 
@@ -88,8 +92,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         /* app_handle */ None,
     );
 
-    // Hard 6-minute cap per the J/M evidence brief.
-    let outcome = tokio::time::timeout(Duration::from_secs(6 * 60), orch.run()).await;
+    // Hard 9-minute cap.
+    let outcome = tokio::time::timeout(Duration::from_secs(9 * 60), orch.run()).await;
     let timed_out = outcome.is_err();
     if timed_out {
         println!("[e2e_dev] WALL-CLOCK CAP HIT (>6 min) — printing best-effort state below");

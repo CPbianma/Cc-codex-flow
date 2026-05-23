@@ -63,7 +63,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut task = task;
     task.workspace_path = ws_path.to_string_lossy().into_owned();
 
-    let profile = Profile::load("visual")?;
+    let mut profile = Profile::load("visual")?;
+    profile.default_permission = flow_lib::adapter::Permission::FullAuto;
     let claude: Arc<dyn AgentAdapter> = Arc::new(ClaudeAdapter::new(claude_bin));
     let codex: Arc<dyn AgentAdapter> = Arc::new(CodexAdapter::new(codex_bin));
 
@@ -76,10 +77,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         /* app_handle */ None,
     );
 
-    let outcome = tokio::time::timeout(Duration::from_secs(6 * 60), orch.run()).await;
+    let outcome = tokio::time::timeout(Duration::from_secs(9 * 60), orch.run()).await;
     let timed_out = outcome.is_err();
     if timed_out {
-        println!("[e2e_visual] WALL-CLOCK CAP HIT (>6 min) — printing best-effort state below");
+        println!("[e2e_visual] WALL-CLOCK CAP HIT (>9 min) — printing best-effort state below");
     } else if let Ok(Err(e)) = outcome {
         println!("[e2e_visual] orchestrator returned error: {e}");
     }

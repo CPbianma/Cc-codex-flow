@@ -9,8 +9,8 @@ You are reviewing Codex's implementation against your own visual specification f
 {prior_artifacts}
 
 ## Source of truth
-- Your spec: `decisions/{round}-wireframe.md`, `decisions/{round}-visual-spec.md`, `decisions/{round}-plan.md`
-- Codex's implementation: `execution/{round}-impl.md`, `execution/{round}-diff.patch`, and (if applicable) `execution/{round}-preview.png`
+- Your spec: `decisions/{n}-wireframe.md`, `decisions/{n}-visual-spec.md`, `decisions/{n}-plan.md`
+- Codex's implementation: `execution/{n}-impl.md`, `execution/{n}-diff.patch`, and (if applicable) `execution/{n}-preview.png`
 
 ## Review checklist
 
@@ -22,7 +22,7 @@ Walk these in order. For each, note PASS or FAIL with the specific delta.
 4. **Missing elements** — did Codex skip anything the spec required?
 5. **For charts/figures** — does the rendered preview match the spec's color palette, line weights, fonts, legend placement, and grid style?
 
-## Output to `decisions/{round}-review.md`
+## Output to `decisions/{n}-review.md`
 
 The very first line must be the verdict:
 - `PASS` — if all checks above passed.
