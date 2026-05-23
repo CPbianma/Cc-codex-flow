@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Flow — Streaming tail evidence</title>
+<style>
+:root {
+  --cream: #FAF6EE;
+  --clay: #E8DECA;
+  --surface: #FFFFFF;
+  --surface-2: #FAF6EE;
+  --ink: #1F2937;
+  --ink-dim: #6B7280;
+  --border: #E5E0D2;
+  --border-strong: #C9C0AB;
+  --fail: #B0533A;
+  --fail-soft: #F8E6DE;
+  --ok: #4C7C5A;
+  --ok-soft: #E2EEDE;
+  --r-sm: 8px;
+}
+body {
+  margin: 0;
+  background: var(--cream);
+  font-family: "Source Serif 4", "Source Serif Pro", Georgia, serif;
+  color: var(--ink);
+  padding: 32px;
+}
+.pane-header {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+}
+.thread-title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 18px;
+  font-weight: 600;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--clay);
+  color: var(--ink);
+  font-size: 11px;
+  border: 1px solid var(--border-strong);
+}
+.badge.state { background: var(--ok-soft); color: var(--ok); }
+.thread-title-text { color: var(--ink); }
+.turn-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 14px 0;
+  overflow: hidden;
+}
+.turn-card.streaming { border-color: var(--border-strong); }
+.turn-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.turn-avatar {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--ink-dim); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.dim { color: var(--ink-dim); font-size: 12px; }
+.streaming-tail {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--surface-2);
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+</style>
+</head>
+<body>
+<div class="pane-header">
+  <div class="thread-title">
+    <span class="badge state">R1_Deciding</span>
+    <span class="badge">R1</span>
+    <span class="thread-title-text">写一个把 markdown 转 docx 的 Python 脚本</span>
+  </div>
+</div>
+
+<div class="turn-card streaming">
+  <div class="turn-head">
+    <span class="turn-avatar" aria-hidden>⋯</span>
+    <span style="font-weight:500">R1_Deciding</span>
+    <span class="dim">流式输出中…</span>
+  </div>
+  <pre class="streaming-tail">已写入 `decisions/001-plan.md`。
+
+**计划摘要：**
+- **目标**：用 Python 实现 Markdown → DOCX 的命令行转换脚本。
+- **方法**：`markdown-it-py` 解析 + `python-docx` 生成；写一个 `DocxRenderer` 类遍历 token。
+- **产出文件**（全部位于 `artifacts/`）：
+  - `md2docx.py`（主脚本，含 CLI）
+  - `requirements.txt`（依赖清单）
+  - `README.md`（使用说明）
+  - `sample.md`（覆盖各语法的样例）
+- **支持语法**：标题、粗体/斜体、行内代码、代码块、有序/无序列表（含嵌套）、引用、链接、图片、水平线、表格。
+- **验收**：CLI 可跑通、覆盖列出的所有元素、错误处理友好、依赖缺失给出安装提示。</pre>
+</div>
+</body>
+</html>

@@ -97,8 +97,20 @@ pub async fn list_workspace_files(id: String) -> Result<Vec<String>> {
 #[tauri::command]
 pub async fn read_workspace_file(id: String, relative_path: String) -> Result<String> {
     let task = Task::get(&id)?;
-    let path = std::path::Path::new(&task.workspace_path).join(&relative_path);
-    Ok(std::fs::read_to_string(&path)?)
+    let ws = std::path::Path::new(&task.workspace_path);
+    // Defence-in-depth against path traversal: resolve the requested path
+    // and verify it stays inside the workspace. Reject absolute inputs and
+    // any `..` that climbs above the workspace root.
+    let joined = ws.join(&relative_path);
+    let ws_can = std::fs::canonicalize(ws).unwrap_or_else(|_| ws.to_path_buf());
+    let target_can = std::fs::canonicalize(&joined).unwrap_or(joined.clone());
+    if !target_can.starts_with(&ws_can) {
+        return Err(AppError::Other(format!(
+            "拒绝越界访问: {}",
+            relative_path
+        )));
+    }
+    Ok(std::fs::read_to_string(&target_can)?)
 }
 
 #[tauri::command]
@@ -170,8 +182,14 @@ pub async fn reset_task(id: String) -> Result<()> {
         );
         if !is_terminal {
             // Signal abort so the orchestrator unwinds itself, then ask the
-            // caller to retry once the FSM has settled.
+            // caller to retry once the FSM has settled. Also clear any
+            // paused flag — if the orchestrator was blocked in the pause
+            // spin-loop, it would never poll abort.flag.
             std::fs::write(meta.join("abort.flag"), chrono::Utc::now().to_rfc3339())?;
+            std::fs::write(
+                meta.join("control.json"),
+                serde_json::to_string_pretty(&serde_json::json!({ "paused": false }))?,
+            )?;
             return Err(AppError::Other(format!(
                 "任务正在运行中（{state_str}），已发送中止信号，请稍候再试"
             )));

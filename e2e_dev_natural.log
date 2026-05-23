@@ -1,0 +1,23 @@
+[e2e_dev] claude = Some("C:/Users/<user>/.local/bin/claude.cmd")
+[e2e_dev] codex  = Some("E:/develop/nodejs/codex.cmd")
+[e2e_dev] workspace = D:\flow-workspaces-evidence\eede5090-e35d-4513-ac58-f58c59e108f7
+[2m2026-05-23T13:46:45.690483Z[0m [32m INFO[0m [2mflow_lib::adapter::claude[0m[2m:[0m spawning claude [3mturn[0m[2m=[0mr1-decide [3mbinary[0m[2m=[0mC:/Users/<user>/.local/bin/claude.cmd
+[2m2026-05-23T13:50:05.846748Z[0m [32m INFO[0m [2mflow_lib::adapter::codex[0m[2m:[0m spawning codex [3mturn[0m[2m=[0mr1-execute [3mbinary[0m[2m=[0mE:/develop/nodejs/codex.cmd
+[2m2026-05-23T13:51:28.293476Z[0m [32m INFO[0m [2mflow_lib::adapter::claude[0m[2m:[0m spawning claude [3mturn[0m[2m=[0mr1-review [3mbinary[0m[2m=[0mC:/Users/<user>/.local/bin/claude.cmd
+[2m2026-05-23T13:53:04.307873Z[0m [32m INFO[0m [2mflow_lib::adapter::claude[0m[2m:[0m spawning claude [3mturn[0m[2m=[0mr2-decide [3mbinary[0m[2m=[0mC:/Users/<user>/.local/bin/claude.cmd
+[2m2026-05-23T13:53:56.051034Z[0m [32m INFO[0m [2mflow_lib::adapter::codex[0m[2m:[0m spawning codex [3mturn[0m[2m=[0mr2-execute [3mbinary[0m[2m=[0mE:/develop/nodejs/codex.cmd
+[2m2026-05-23T14:02:45.832635Z[0m [32m INFO[0m [2mflow_lib::adapter::claude[0m[2m:[0m spawning claude [3mturn[0m[2m=[0mr2-review [3mbinary[0m[2m=[0mC:/Users/<user>/.local/bin/claude.cmd
+[2m2026-05-23T14:03:26.682236Z[0m [32m INFO[0m [2mflow_lib::adapter::codex[0m[2m:[0m spawning codex [3mturn[0m[2m=[0mr3-decide [3mbinary[0m[2m=[0mE:/develop/nodejs/codex.cmd
+[2m2026-05-23T14:05:34.311637Z[0m [32m INFO[0m [2mflow_lib::adapter::claude[0m[2m:[0m spawning claude [3mturn[0m[2m=[0mr3-execute [3mbinary[0m[2m=[0mC:/Users/<user>/.local/bin/claude.cmd
+[2m2026-05-23T14:07:07.869096Z[0m [32m INFO[0m [2mflow_lib::adapter::codex[0m[2m:[0m spawning codex [3mturn[0m[2m=[0mr3-review [3mbinary[0m[2m=[0mE:/develop/nodejs/codex.cmd
+[e2e_dev] terminal state: Done
+[e2e_dev] history       : ["R1_Deciding", "R1_Executing", "R1_Reviewing", "R2_Deciding", "R2_Executing", "R2_Reviewing", "R3_Deciding", "R3_Executing", "R3_Reviewing", "Done"]
+[e2e_dev] last_error    : None
+[e2e_dev] artifacts/    :
+  md2docx.py (11463 bytes)
+[e2e_dev] decisions/    :
+  002-plan.md (6261 bytes)
+  003-plan.md (6060 bytes)
+  003-review.md (1083 bytes)
+[e2e_dev] r1-execute.stream.jsonl size = 342 bytes (path = D:\flow-workspaces-evidence\eede5090-e35d-4513-ac58-f58c59e108f7\meta\turns\r1-execute.stream.jsonl)
+[e2e_dev] no MCP error/fail signals found in stream files

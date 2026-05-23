@@ -1,0 +1,11 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]: R1_Deciding
+    - generic [ref=e5]: R1
+    - generic [ref=e6]: 写一个把 markdown 转 docx 的 Python 脚本
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9]: ⋯
+      - generic [ref=e10]: R1_Deciding
+      - generic [ref=e11]: 流式输出中…
+    - generic [ref=e12]: "已写入 `decisions/001-plan.md`。 **计划摘要：** - **目标**：用 Python 实现 Markdown → DOCX 的命令行转换脚本。 - **方法**：`markdown-it-py` 解析 + `python-docx` 生成；写一个 `DocxRenderer` 类遍历 token。 - **产出文件**（全部位于 `artifacts/`）： - `md2docx.py`（主脚本，含 CLI） - `requirements.txt`（依赖清单） - `README.md`（使用说明） - `sample.md`（覆盖各语法的样例） - **支持语法**：标题、粗体/斜体、行内代码、代码块、有序/无序列表（含嵌套）、引用、链接、图片、水平线、表格。 - **验收**：CLI 可跑通、覆盖列出的所有元素、错误处理友好、依赖缺失给出安装提示。"
