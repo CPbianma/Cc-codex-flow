@@ -169,6 +169,7 @@ body, html, #root {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   background: var(--bg);
   border-right: 1px solid var(--border);
 }
@@ -484,6 +485,12 @@ body, html, #root {
   text-overflow: ellipsis;
   text-transform: none;
   letter-spacing: -0.1px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.thread-actions {
+  flex-shrink: 0;
 }
 
 .thread-body {
